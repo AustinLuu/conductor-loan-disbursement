@@ -44,7 +44,7 @@ def _application(**overrides) -> ApplicationInput:
     return ApplicationInput(**defaults)
 
 
-def _mock_activities(underwriting_outcome="approve", underwriting_reason="auto_approved"):
+def _mock_activities(underwriting_outcome="approve", underwriting_reason="auto_approved", fraud_status="complete"):
     """Stand-ins for the real activities (which hit adapters/Postgres), keyed
     to match by name so the *real* workflow code needs no test-only branches
     (TDD §7)."""
@@ -67,7 +67,7 @@ def _mock_activities(underwriting_outcome="approve", underwriting_reason="auto_a
 
     @activity.defn(name="run_fraud_check")
     async def fraud(application: ApplicationInput) -> CheckResult:
-        return CheckResult(check_type="fraud", status="complete", detail={"risk_score": 0.05})
+        return CheckResult(check_type="fraud", status=fraud_status, detail={"risk_score": 0.05})
 
     @activity.defn(name="evaluate_underwriting")
     async def underwrite(input: UnderwritingInput) -> UnderwritingDecision:
@@ -179,3 +179,36 @@ async def test_human_review_timeout_escalates():
             )
     assert result.status == ApplicationStatus.ESCALATED
     assert result.reason == "review_timeout"
+
+
+async def test_failed_check_routes_to_review_without_underwriting():
+    # underwriting_outcome defaults to "approve" — if evaluate_underwriting ran
+    # despite the failed fraud check, the workflow would fund immediately and
+    # never reach NEEDS_HUMAN_REVIEW, timing out the query loop below.
+    async with await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter) as env:
+        async with Worker(
+            env.client,
+            task_queue=TASK_QUEUE,
+            workflows=[LoanApplicationWorkflow],
+            activities=_mock_activities(fraud_status="failed"),
+        ):
+            handle = await env.client.start_workflow(
+                LoanApplicationWorkflow.run,
+                _application(),
+                id=f"wf-{uuid.uuid4()}",
+                task_queue=TASK_QUEUE,
+            )
+            for _ in range(100):
+                status = await handle.query(LoanApplicationWorkflow.get_status)
+                if status == ApplicationStatus.NEEDS_HUMAN_REVIEW.value:
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("workflow never reached NEEDS_HUMAN_REVIEW")
+
+            await handle.signal(
+                LoanApplicationWorkflow.submit_review_decision,
+                ReviewDecision(outcome="approve", reason="manual_ok", reviewer="ops1"),
+            )
+            result = await handle.result()
+    assert result.status == ApplicationStatus.FUNDED

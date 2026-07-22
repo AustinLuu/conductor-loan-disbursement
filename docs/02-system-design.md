@@ -121,11 +121,18 @@ small class in code (`backend/policies/`), looked up by `product_type`; see §6.
 | Signal | `submit_document(doc)` | Applicant uploaded a missing document |
 | Signal | `submit_review_decision(decision)` | Human reviewer's approve/decline/escalate |
 | Query | `get_status()` | Current state-machine status |
-| Query | `get_sla_remaining()` | Time left against the 48h deadline |
 
 Signals, not a synchronous `Update`, for the review decision — the dashboard
 needs an immediate ack that the decision was recorded, not a blocking wait for
 the workflow to finish processing it.
+
+No "time remaining" query — a Query answers against workflow state as of the
+last completed workflow task, and a workflow parked in `wait_condition` for
+hours produces no new tasks. `get_status()` is safe to read that way because
+the status genuinely doesn't change while parked; a live countdown would
+silently go stale the same way. The SLA countdown is computed directly from
+the `sla_deadline` column already written to Postgres at submission — exact at
+any wall-clock moment, no query needed.
 
 ### 3.3 Third-party interfaces (mocked, stable contracts)
 
@@ -161,9 +168,14 @@ flowchart LR
 
 All three adapters do the same three things: parse the channel-specific shape →
 validate against a canonical schema → derive a deterministic Workflow ID from the
-source's own identifier. That last part is the whole dedup mechanism — Temporal
-rejects a second `start_workflow` for an ID that's already running, so a resent
-email or a redelivered batch file can't create a duplicate application.
+source's own identifier, and start it with `WorkflowIDReusePolicy.REJECT_DUPLICATE`.
+That policy is the actual dedup mechanism — Temporal's default reuse policy only
+rejects a second `start_workflow` while the *first* is still running; once an
+application reaches a terminal state, the default would let a redelivered batch
+record or a resent broker email start a genuine duplicate. `REJECT_DUPLICATE`
+closes that gap explicitly rather than relying on the ID alone. See
+[TDD §4](./03-TDD.md#4-starting-a-workflow-ingestion-adapters) for the actual
+client call.
 
 ### 4.2 Main application pipeline
 
@@ -316,8 +328,11 @@ build next rather than what's here now.
 
 **Idempotent ingestion.** All three channels derive a deterministic Workflow ID
 from their own natural key (`loan-app-{channel}-{external_ref}`) before calling
-`start_workflow`. Temporal's own ID-uniqueness guarantee does the dedup — no
-custom "have I seen this before" table needed at the ingestion layer.
+`start_workflow` with `id_reuse_policy=REJECT_DUPLICATE`. The policy, not just
+the deterministic ID, is what makes this hold after an application closes —
+Temporal's default reuse policy only blocks a duplicate while the original is
+still running. No custom "have I seen this before" table needed at the
+ingestion layer either way, but the explicit policy is required.
 
 **Product isolation.** `LoanApplicationWorkflow` is identical across personal,
 auto, and debt-consolidation loans. A `LoanProductPolicy` interface

@@ -46,6 +46,7 @@ THIRD_PARTY_RETRY = RetryPolicy(
     maximum_attempts=5,
     non_retryable_error_types=["InvalidApplicationDataError"],
 )
+DEFAULT_RETRY = RetryPolicy(maximum_attempts=3)
 
 _ACTIVITY_TIMEOUT = timedelta(seconds=30)
 _THIRD_PARTY_TIMEOUT = timedelta(minutes=5)
@@ -66,7 +67,10 @@ class LoanApplicationWorkflow:
 
         # 1. Validate
         validation = await workflow.execute_activity(
-            validate_application, application, start_to_close_timeout=_ACTIVITY_TIMEOUT
+            validate_application,
+            application,
+            retry_policy=DEFAULT_RETRY,
+            start_to_close_timeout=_ACTIVITY_TIMEOUT,
         )
         if validation.missing_documents:
             self.status = ApplicationStatus.AWAITING_DOCUMENTS
@@ -119,12 +123,16 @@ class LoanApplicationWorkflow:
         identity = self._as_check_result(identity, "identity")
         fraud = self._as_check_result(fraud, "fraud")
 
+        if any(c.status == "failed" for c in (credit, identity, fraud)):
+            return await self._send_to_review(application, "check_unavailable")
+
         # 3. Underwrite
         self.status = ApplicationStatus.UNDERWRITING
         await self._audit(application, "status_changed", "system", {}, new_status=self.status)
         decision = await workflow.execute_activity(
             evaluate_underwriting,
             UnderwritingInput(application=application, credit=credit, identity=identity, fraud=fraud),
+            retry_policy=DEFAULT_RETRY,
             start_to_close_timeout=_ACTIVITY_TIMEOUT,
         )
         await self._audit(
@@ -146,27 +154,7 @@ class LoanApplicationWorkflow:
             return await self._decline(application, decision.reason)
 
         # 4. Human review
-        self.status = ApplicationStatus.NEEDS_HUMAN_REVIEW
-        await self._audit(application, "status_changed", "system", {}, new_status=self.status)
-        await workflow.execute_activity(
-            create_review_task,
-            ReviewTaskInput(application_id=application.id, reason=decision.reason),
-            start_to_close_timeout=_ACTIVITY_TIMEOUT,
-        )
-        try:
-            await workflow.wait_condition(
-                lambda: self.review_decision is not None,
-                timeout=self._remaining_sla(),
-            )
-        except asyncio.TimeoutError:
-            pass
-        if self.review_decision is None:
-            return await self._escalate(application, "review_timeout")
-        if self.review_decision.outcome == "approve":
-            return await self._fund(application)
-        if self.review_decision.outcome == "decline":
-            return await self._decline(application, self.review_decision.reason)
-        return await self._escalate(application, self.review_decision.reason)
+        return await self._send_to_review(application, decision.reason)
 
     @workflow.signal
     async def submit_document(self, doc: DocumentSubmission) -> None:
@@ -229,6 +217,29 @@ class LoanApplicationWorkflow:
         self.status = ApplicationStatus.FUNDED
         await self._audit(application, "application_funded", "system", {}, new_status=self.status)
         return ApplicationResult(application_id=application.id, status=self.status)
+
+    async def _send_to_review(self, application: ApplicationInput, reason: str) -> ApplicationResult:
+        self.status = ApplicationStatus.NEEDS_HUMAN_REVIEW
+        await self._audit(application, "status_changed", "system", {}, new_status=self.status)
+        await workflow.execute_activity(
+            create_review_task,
+            ReviewTaskInput(application_id=application.id, reason=reason),
+            start_to_close_timeout=_ACTIVITY_TIMEOUT,
+        )
+        try:
+            await workflow.wait_condition(
+                lambda: self.review_decision is not None,
+                timeout=self._remaining_sla(),
+            )
+        except asyncio.TimeoutError:
+            pass
+        if self.review_decision is None:
+            return await self._escalate(application, "review_timeout")
+        if self.review_decision.outcome == "approve":
+            return await self._fund(application)
+        if self.review_decision.outcome == "decline":
+            return await self._decline(application, self.review_decision.reason)
+        return await self._escalate(application, self.review_decision.reason)
 
     async def _decline(self, application: ApplicationInput, reason: str) -> ApplicationResult:
         self.status = ApplicationStatus.DECLINED

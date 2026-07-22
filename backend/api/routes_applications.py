@@ -13,7 +13,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from temporalio.client import Client
+from temporalio.client import Client, WorkflowIDReusePolicy
 
 from backend.db.models import Application, AuditEvent, Check, Document, ReviewTask
 from backend.db.session import session_scope
@@ -112,6 +112,7 @@ async def submit_application(
         application_input,
         id=workflow_id,
         task_queue=_TASK_QUEUE,
+        id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
     )
     return {"application_id": application_id, "workflow_id": workflow_id}
 
