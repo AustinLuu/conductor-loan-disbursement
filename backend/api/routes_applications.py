@@ -1,21 +1,14 @@
-"""Portal application intake + review endpoints (TDD §3.1). Broker-email and
-aggregator-batch intake (routes_ingestion.py, BatchIngestionWorkflow) are out
-of scope for this pass — see the summary in chat; the portal channel alone is
-enough to prove the orchestration model, matching the disciplined-2-hour
-scope call in docs/06-timeboxing-and-approach.md."""
-import hashlib
-import hmac
-import os
+"""Application intake (portal + broker-email) and review/audit endpoints
+(TDD §3.1). Aggregator-batch intake lives in the routes below too, backed by
+BatchIngestionWorkflow — see backend/workflows/batch_ingestion_workflow.py."""
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from temporalio.client import Client
-from temporalio.common import WorkflowIDReusePolicy
-from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from backend.db.models import Application, AuditEvent, Check, Document, ReviewTask
 from backend.db.session import session_scope
@@ -26,16 +19,12 @@ from backend.domain import (
     ProductType,
     ReviewDecision,
 )
+from backend.ingestion import start_application
 from backend.workflows.loan_application_workflow import LoanApplicationWorkflow
 
 router = APIRouter()
 
-_SSN_HASH_SECRET = os.environ.get("SSN_HASH_SECRET", "dev-only-secret-change-me").encode()
 _TASK_QUEUE = "loan-processing"
-
-
-def _hash_ssn(ssn: str) -> str:
-    return hmac.new(_SSN_HASH_SECRET, ssn.encode(), hashlib.sha256).hexdigest()
 
 
 def get_temporal_client(request: Request) -> Client:
@@ -80,57 +69,21 @@ async def submit_application(
     submission: PortalApplicationSubmission,
     client: Client = Depends(get_temporal_client),
 ) -> dict:
-    application_id = str(uuid.uuid4())
-    workflow_id = f"loan-app-portal-{submission.external_ref}"
-
-    application_input = ApplicationInput(
-        id=application_id,
+    outcome = await start_application(
+        client,
         channel=Channel.PORTAL,
         external_ref=submission.external_ref,
         product_type=submission.product_type,
         requested_amount=submission.requested_amount,
         applicant_name=submission.applicant_name,
-        applicant_ssn_hash=_hash_ssn(submission.applicant_ssn),
-        applicant_ssn_last4=submission.applicant_ssn[-4:],
+        applicant_ssn=submission.applicant_ssn,
         submitted_documents=submission.submitted_documents,
     )
-
-    # Start the workflow FIRST — Temporal's own ID-uniqueness check is the
-    # dedup mechanism (system design §4.1). Only persist to Postgres once
-    # that's confirmed, so a rejected duplicate never leaves a phantom row.
-    try:
-        await client.start_workflow(
-            LoanApplicationWorkflow.run,
-            application_input,
-            id=workflow_id,
-            task_queue=_TASK_QUEUE,
-            id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
-        )
-    except WorkflowAlreadyStartedError:
+    if outcome.status == "duplicate":
         raise HTTPException(
             409, f"an application with external_ref {submission.external_ref!r} already exists"
         )
-
-    now = datetime.now(timezone.utc)
-    async with session_scope() as session:
-        session.add(
-            Application(
-                id=application_id,
-                workflow_id=workflow_id,
-                channel=Channel.PORTAL.value,
-                external_ref=submission.external_ref,
-                product_type=submission.product_type.value,
-                status="SUBMITTED",
-                requested_amount=submission.requested_amount,
-                applicant_name=submission.applicant_name,
-                applicant_ssn_hash=application_input.applicant_ssn_hash,
-                applicant_ssn_last4=application_input.applicant_ssn_last4,
-                submitted_at=now,
-                sla_deadline=now + timedelta(hours=48),
-            )
-        )
-
-    return {"application_id": application_id, "workflow_id": workflow_id}
+    return {"application_id": outcome.application_id, "workflow_id": outcome.workflow_id}
 
 
 @router.get("/applications")
