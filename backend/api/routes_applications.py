@@ -13,7 +13,9 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from temporalio.client import Client, WorkflowIDReusePolicy
+from temporalio.client import Client
+from temporalio.common import WorkflowIDReusePolicy
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from backend.db.models import Application, AuditEvent, Check, Document, ReviewTask
 from backend.db.session import session_scope
@@ -54,6 +56,11 @@ def _application_summary(a: Application) -> dict:
 
 
 class PortalApplicationSubmission(BaseModel):
+    # The portal's own idempotency key for this submission (e.g. a
+    # client-generated form-session id) — resubmitting the same value is
+    # what a flaky-network double-click looks like, and it's what the
+    # deterministic workflow ID dedups against (system design §4.1).
+    external_ref: str = Field(min_length=1)
     product_type: ProductType
     requested_amount: Decimal = Field(gt=0)
     applicant_name: str = Field(min_length=1)
@@ -74,12 +81,12 @@ async def submit_application(
     client: Client = Depends(get_temporal_client),
 ) -> dict:
     application_id = str(uuid.uuid4())
-    workflow_id = f"loan-app-portal-{application_id}"
+    workflow_id = f"loan-app-portal-{submission.external_ref}"
 
     application_input = ApplicationInput(
         id=application_id,
         channel=Channel.PORTAL,
-        external_ref=application_id,
+        external_ref=submission.external_ref,
         product_type=submission.product_type,
         requested_amount=submission.requested_amount,
         applicant_name=submission.applicant_name,
@@ -88,6 +95,22 @@ async def submit_application(
         submitted_documents=submission.submitted_documents,
     )
 
+    # Start the workflow FIRST — Temporal's own ID-uniqueness check is the
+    # dedup mechanism (system design §4.1). Only persist to Postgres once
+    # that's confirmed, so a rejected duplicate never leaves a phantom row.
+    try:
+        await client.start_workflow(
+            LoanApplicationWorkflow.run,
+            application_input,
+            id=workflow_id,
+            task_queue=_TASK_QUEUE,
+            id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+        )
+    except WorkflowAlreadyStartedError:
+        raise HTTPException(
+            409, f"an application with external_ref {submission.external_ref!r} already exists"
+        )
+
     now = datetime.now(timezone.utc)
     async with session_scope() as session:
         session.add(
@@ -95,7 +118,7 @@ async def submit_application(
                 id=application_id,
                 workflow_id=workflow_id,
                 channel=Channel.PORTAL.value,
-                external_ref=application_id,
+                external_ref=submission.external_ref,
                 product_type=submission.product_type.value,
                 status="SUBMITTED",
                 requested_amount=submission.requested_amount,
@@ -107,13 +130,6 @@ async def submit_application(
             )
         )
 
-    await client.start_workflow(
-        LoanApplicationWorkflow.run,
-        application_input,
-        id=workflow_id,
-        task_queue=_TASK_QUEUE,
-        id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
-    )
     return {"application_id": application_id, "workflow_id": workflow_id}
 
 
