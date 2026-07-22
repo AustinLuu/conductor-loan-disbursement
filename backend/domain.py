@@ -52,6 +52,29 @@ class ApplicationInput(BaseModel):
     submitted_documents: list[str] = Field(default_factory=list)
 
 
+class BatchApplicationRecord(BaseModel):
+    """One row of an aggregator batch drop, in canonical shape (TDD §5).
+    Constructed manually inside BatchIngestionWorkflow from a raw dict so one
+    malformed record can be rejected without failing the rest of the batch —
+    letting FastAPI validate `list[BatchApplicationRecord]` directly at the
+    API boundary would reject the entire request on the first bad row."""
+
+    external_ref: str = Field(min_length=1)
+    product_type: ProductType
+    requested_amount: Decimal = Field(gt=0)
+    applicant_name: str = Field(min_length=1)
+    applicant_ssn: str = Field(pattern=r"^\d{9}$")
+    submitted_documents: list[str] = Field(default_factory=list)
+
+
+class BatchRecordResult(BaseModel):
+    external_ref: str
+    status: str  # "accepted" | "duplicate" | "duplicate_in_batch" | "rejected"
+    application_id: str | None = None
+    workflow_id: str | None = None
+    reason: str = ""
+
+
 class DocumentSubmission(BaseModel):
     doc_type: str
     storage_ref: str
