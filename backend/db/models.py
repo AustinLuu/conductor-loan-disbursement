@@ -64,6 +64,7 @@ class ReviewTask(Base):
     reason: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="pending")
     decision: Mapped[str | None] = mapped_column(String, nullable=True)
+    reviewer: Mapped[str] = mapped_column(String, default="")
     notes: Mapped[str] = mapped_column(String, default="")
 
 

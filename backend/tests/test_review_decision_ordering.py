@@ -44,7 +44,9 @@ async def test_review_stays_pending_when_signal_fails(monkeypatch):
 
 
 async def test_review_marked_decided_after_successful_signal(monkeypatch):
-    review_task = SimpleNamespace(status="pending", decision=None, notes="", application_id="app-1")
+    review_task = SimpleNamespace(
+        status="pending", decision=None, reviewer="", notes="", application_id="app-1"
+    )
     application = SimpleNamespace(workflow_id="wf-1")
     _patch_session_scope(monkeypatch, review_task, application)
 
@@ -60,3 +62,4 @@ async def test_review_marked_decided_after_successful_signal(monkeypatch):
     assert result == {"status": "signaled"}
     assert review_task.status == "decided"
     assert review_task.decision == "approve"
+    assert review_task.reviewer == "alice"

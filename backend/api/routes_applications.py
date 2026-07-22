@@ -266,6 +266,7 @@ async def submit_review_decision(
         review_task = await session.get(ReviewTask, review_id)
         review_task.status = "decided"
         review_task.decision = submission.outcome
+        review_task.reviewer = submission.reviewer
         review_task.notes = submission.notes
 
     return {"status": "signaled"}

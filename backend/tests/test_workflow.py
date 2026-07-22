@@ -44,7 +44,10 @@ def _application(**overrides) -> ApplicationInput:
     return ApplicationInput(**defaults)
 
 
-def _mock_activities(underwriting_outcome="approve", underwriting_reason="auto_approved", fraud_status="complete"):
+def _mock_activities(
+    underwriting_outcome="approve", underwriting_reason="auto_approved", fraud_status="complete",
+    audit_log: list | None = None,
+):
     """Stand-ins for the real activities (which hit adapters/Postgres), keyed
     to match by name so the *real* workflow code needs no test-only branches
     (TDD §7)."""
@@ -85,7 +88,8 @@ def _mock_activities(underwriting_outcome="approve", underwriting_reason="auto_a
 
     @activity.defn(name="record_audit_event")
     async def audit(input: AuditEventInput) -> None:
-        return None
+        if audit_log is not None:
+            audit_log.append(input)
 
     return [validate, record_document, credit, identity, fraud, underwrite, review_task, disburse, audit]
 
@@ -128,13 +132,15 @@ async def test_auto_decline_terminal_state():
 
 
 async def test_human_review_approve_via_signal_resumes_and_funds():
+    audit_log: list[AuditEventInput] = []
     async with await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter) as env:
         async with Worker(
             env.client,
             task_queue=TASK_QUEUE,
             workflows=[LoanApplicationWorkflow],
             activities=_mock_activities(
-                underwriting_outcome="refer", underwriting_reason="manual_underwriting_required"
+                underwriting_outcome="refer", underwriting_reason="manual_underwriting_required",
+                audit_log=audit_log,
             ),
         ):
             handle = await env.client.start_workflow(
@@ -157,6 +163,8 @@ async def test_human_review_approve_via_signal_resumes_and_funds():
             )
             result = await handle.result()
     assert result.status == ApplicationStatus.FUNDED
+    funded_events = [e for e in audit_log if e.event_type == "application_funded"]
+    assert funded_events and funded_events[0].actor == "ops1"
 
 
 async def test_human_review_timeout_escalates():

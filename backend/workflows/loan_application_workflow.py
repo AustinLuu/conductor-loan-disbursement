@@ -193,9 +193,9 @@ class LoanApplicationWorkflow:
             start_to_close_timeout=_ACTIVITY_TIMEOUT,
         )
 
-    async def _fund(self, application: ApplicationInput) -> ApplicationResult:
+    async def _fund(self, application: ApplicationInput, actor: str = "system") -> ApplicationResult:
         self.status = ApplicationStatus.FUNDING
-        await self._audit(application, "status_changed", "system", {}, new_status=self.status)
+        await self._audit(application, "status_changed", actor, {}, new_status=self.status)
         idempotency_key = str(workflow.uuid4())
         try:
             await workflow.execute_activity(
@@ -211,7 +211,7 @@ class LoanApplicationWorkflow:
         except ActivityError:
             return await self._escalate(application, "disbursement_failed")
         self.status = ApplicationStatus.FUNDED
-        await self._audit(application, "application_funded", "system", {}, new_status=self.status)
+        await self._audit(application, "application_funded", actor, {}, new_status=self.status)
         return ApplicationResult(application_id=application.id, status=self.status)
 
     async def _send_to_review(self, application: ApplicationInput, reason: str) -> ApplicationResult:
@@ -231,22 +231,27 @@ class LoanApplicationWorkflow:
             pass
         if self.review_decision is None:
             return await self._escalate(application, "review_timeout")
+        reviewer = self.review_decision.reviewer
         if self.review_decision.outcome == "approve":
-            return await self._fund(application)
+            return await self._fund(application, actor=reviewer)
         if self.review_decision.outcome == "decline":
-            return await self._decline(application, self.review_decision.reason)
-        return await self._escalate(application, self.review_decision.reason)
+            return await self._decline(application, self.review_decision.reason, actor=reviewer)
+        return await self._escalate(application, self.review_decision.reason, actor=reviewer)
 
-    async def _decline(self, application: ApplicationInput, reason: str) -> ApplicationResult:
+    async def _decline(
+        self, application: ApplicationInput, reason: str, actor: str = "system"
+    ) -> ApplicationResult:
         self.status = ApplicationStatus.DECLINED
         await self._audit(
-            application, "application_declined", "system", {"reason": reason}, new_status=self.status
+            application, "application_declined", actor, {"reason": reason}, new_status=self.status
         )
         return ApplicationResult(application_id=application.id, status=self.status, reason=reason)
 
-    async def _escalate(self, application: ApplicationInput, reason: str) -> ApplicationResult:
+    async def _escalate(
+        self, application: ApplicationInput, reason: str, actor: str = "system"
+    ) -> ApplicationResult:
         self.status = ApplicationStatus.ESCALATED
         await self._audit(
-            application, "application_escalated", "system", {"reason": reason}, new_status=self.status
+            application, "application_escalated", actor, {"reason": reason}, new_status=self.status
         )
         return ApplicationResult(application_id=application.id, status=self.status, reason=reason)
