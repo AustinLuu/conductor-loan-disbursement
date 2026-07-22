@@ -94,6 +94,12 @@ th {
   margin-bottom: 0.75rem;
 }
 
+.refresh-note {
+  color: #5b616e;
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
+}
+
 .check-grid pre {
   background: #f5f6f8;
   padding: 0.5rem;

@@ -89,31 +89,71 @@ function DecisionForm({ reviewId, onDecided }) {
 export default function ReviewQueue() {
   const [items, setItems] = useState([]);
   const [error, setError] = useState(null);
+  const [partialError, setPartialError] = useState(null);
   const [loading, setLoading] = useState(true);
+  // ponytail: true until the first fetch attempt finishes (success or failure), then
+  // never reset — distinguishes "nothing rendered yet" from "refetching in the background"
+  // so a post-decision refresh doesn't unmount every other card's in-progress form.
+  const [initialLoad, setInitialLoad] = useState(true);
   const now = useNow();
 
+  // Each call owns its own cancellation scope so a stale invocation (e.g. React
+  // StrictMode's double-invoke on mount) can never clobber state after a fresher
+  // one has already resolved. refresh() stays a plain function other call sites
+  // (DecisionForm's onDecided) can invoke directly; the mount effect uses the
+  // returned canceller as its cleanup.
   function refresh() {
+    let cancelled = false;
     setLoading(true);
     setError(null);
     listReviews()
       .then((reviews) =>
-        Promise.all(
-          reviews.map(async (review) => ({
-            review,
-            application: await getApplication(review.application_id),
-          }))
-        )
+        Promise.allSettled(
+          reviews.map((review) =>
+            getApplication(review.application_id).then((application) => ({ review, application }))
+          )
+        ).then((results) => {
+          if (cancelled) return;
+          const loaded = [];
+          const failures = [];
+          results.forEach((result, i) => {
+            if (result.status === "fulfilled") {
+              loaded.push(result.value);
+            } else {
+              failures.push(
+                `application ${reviews[i].application_id.slice(0, 8)}: ${result.reason.message}`
+              );
+            }
+          });
+          setItems(loaded);
+          setPartialError(
+            failures.length === 0
+              ? null
+              : `${failures.length} of ${results.length} review item${
+                  results.length === 1 ? "" : "s"
+                } failed to load — ${failures.join("; ")}`
+          );
+        })
       )
-      .then(setItems)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setInitialLoad(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }
 
   useEffect(refresh, []);
 
-  if (loading) return <p>Loading review queue…</p>;
-  if (error) return <div className="error-banner">{error}</div>;
-  if (items.length === 0) return <p className="empty-state">Review queue is empty.</p>;
+  if (initialLoad) return <p>Loading review queue…</p>;
+  if (error && items.length === 0) return <div className="error-banner">{error}</div>;
+  if (items.length === 0 && !loading) return <p className="empty-state">Review queue is empty.</p>;
 
   const sorted = [...items].sort(
     (a, b) => new Date(a.application.sla_deadline) - new Date(b.application.sla_deadline)
@@ -121,6 +161,9 @@ export default function ReviewQueue() {
 
   return (
     <>
+      {loading && <p className="refresh-note">Refreshing…</p>}
+      {error && <div className="error-banner">{error}</div>}
+      {partialError && <div className="error-banner">{partialError}</div>}
       {sorted.map(({ review, application }) => {
         const sla = computeSlaStatus(application.submitted_at, application.sla_deadline, now);
         return (
