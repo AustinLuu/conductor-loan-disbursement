@@ -12,6 +12,7 @@ from datetime import timedelta
 from pydantic import ValidationError
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
     from backend.activities.batch_ingestion import start_application_workflow
@@ -43,12 +44,17 @@ class BatchIngestionWorkflow:
                 continue
 
             seen_refs.add(external_ref)
-            result = await workflow.execute_activity(
-                start_application_workflow,
-                record,
-                start_to_close_timeout=timedelta(seconds=30),
-                retry_policy=RetryPolicy(maximum_attempts=3),
-            )
+            try:
+                result = await workflow.execute_activity(
+                    start_application_workflow,
+                    record,
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+            except ActivityError as exc:
+                result = BatchRecordResult(
+                    external_ref=external_ref, status="failed", reason=str(exc)
+                )
             results.append(result)
 
         return results

@@ -69,7 +69,7 @@ class BatchApplicationRecord(BaseModel):
 
 class BatchRecordResult(BaseModel):
     external_ref: str
-    status: str  # "accepted" | "duplicate" | "duplicate_in_batch" | "rejected"
+    status: str  # "accepted" | "duplicate" | "duplicate_in_batch" | "rejected" | "failed"
     application_id: str | None = None
     workflow_id: str | None = None
     reason: str = ""

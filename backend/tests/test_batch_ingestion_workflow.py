@@ -83,6 +83,33 @@ async def test_batch_rejects_invalid_record_without_aborting_others():
     assert results[1].reason
 
 
+def _mock_failing_activity():
+    @activity.defn(name="start_application_workflow")
+    async def start_application_workflow(record: BatchApplicationRecord) -> BatchRecordResult:
+        raise ValueError("simulated persistent failure")
+
+    return start_application_workflow
+
+
+async def test_batch_marks_record_failed_when_activity_exhausts_retries():
+    async with await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter) as env:
+        async with Worker(
+            env.client,
+            task_queue=TASK_QUEUE,
+            workflows=[BatchIngestionWorkflow],
+            activities=[_mock_failing_activity()],
+        ):
+            records = [_valid_record("rec-1")]
+            results = await env.client.execute_workflow(
+                BatchIngestionWorkflow.run,
+                records,
+                id=f"batch-{uuid.uuid4()}",
+                task_queue=TASK_QUEUE,
+            )
+    assert results[0].status == "failed"
+    assert results[0].reason
+
+
 async def test_batch_dedupes_same_external_ref_within_one_batch():
     calls: list[str] = []
     async with await WorkflowEnvironment.start_time_skipping(data_converter=pydantic_data_converter) as env:
