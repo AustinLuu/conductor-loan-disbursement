@@ -1,0 +1,156 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f5f6f8;
+  color: #1a1d23;
+}
+
+header.app-header {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 1.5rem;
+  background: #1a1d23;
+}
+
+header.app-header button {
+  background: transparent;
+  border: none;
+  color: #c7cbd1;
+  font-size: 1rem;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+header.app-header button.active {
+  background: #2d3138;
+  color: #fff;
+  font-weight: 600;
+}
+
+main {
+  padding: 1.5rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+th, td {
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid #e6e8eb;
+  font-size: 0.9rem;
+}
+
+th {
+  background: #eef0f3;
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.badge.on_track { background: #dff5e1; color: #1e7d32; }
+.badge.at_risk { background: #fff2cc; color: #8a6100; }
+.badge.breached { background: #fbe0e0; color: #a4262c; }
+
+.review-card {
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.review-card h3 {
+  margin: 0 0 0.25rem;
+}
+
+.review-card .meta {
+  color: #5b616e;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.check-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.check-grid pre {
+  background: #f5f6f8;
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  margin: 0.25rem 0 0;
+}
+
+.decision-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.decision-form input, .decision-form textarea {
+  flex: 1 1 200px;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #c7cbd1;
+  border-radius: 4px;
+  font-family: inherit;
+}
+
+.decision-form .actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.decision-form button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #fff;
+  font-weight: 600;
+}
+
+button.approve { background: #1e7d32; }
+button.decline { background: #a4262c; }
+button.escalate { background: #8a6100; }
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.empty-state {
+  color: #5b616e;
+  padding: 2rem;
+  text-align: center;
+}
+
+.error-banner {
+  background: #fbe0e0;
+  color: #a4262c;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
