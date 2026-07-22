@@ -168,10 +168,6 @@ class LoanApplicationWorkflow:
     def get_status(self) -> str:
         return self.status.value
 
-    @workflow.query
-    def get_sla_remaining(self) -> float:
-        return self._remaining_sla().total_seconds()
-
     def _remaining_sla(self) -> timedelta:
         return max(self.sla_deadline - workflow.now(), timedelta(0))
 
