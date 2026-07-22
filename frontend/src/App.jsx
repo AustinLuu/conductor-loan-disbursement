@@ -1,15 +1,9 @@
 import { useState } from "react";
-
-function ApplicationListPlaceholder() {
-  return <p>Application list goes here.</p>;
-}
-
-function ReviewQueuePlaceholder() {
-  return <p>Review queue goes here.</p>;
-}
+import ApplicationList from "./components/ApplicationList.jsx";
+import ReviewQueuePlaceholder from "./components/ReviewQueuePlaceholder.jsx";
 
 const TABS = [
-  { id: "applications", label: "Applications", Component: ApplicationListPlaceholder },
+  { id: "applications", label: "Applications", Component: ApplicationList },
   { id: "reviews", label: "Review Queue", Component: ReviewQueuePlaceholder },
 ];
 
