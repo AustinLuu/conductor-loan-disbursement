@@ -55,6 +55,18 @@ class PortalApplicationSubmission(BaseModel):
     submitted_documents: list[str] = Field(default_factory=list)
 
 
+class BrokerEmailSubmission(BaseModel):
+    # message_id is the broker email's own natural key — same idempotency
+    # role external_ref plays for the portal (system design §4.1).
+    message_id: str = Field(min_length=1)
+    broker_name: str = Field(min_length=1)
+    product_type: ProductType
+    requested_amount: Decimal = Field(gt=0)
+    applicant_name: str = Field(min_length=1)
+    applicant_ssn: str = Field(pattern=r"^\d{9}$")
+    submitted_documents: list[str] = Field(default_factory=list)
+
+
 class ReviewDecisionSubmission(BaseModel):
     outcome: str  # approve | decline | escalate
     reason: str
@@ -82,6 +94,32 @@ async def submit_application(
             409, f"an application with external_ref {submission.external_ref!r} already exists"
         )
     return {"application_id": outcome.application_id, "workflow_id": outcome.workflow_id}
+
+
+@router.post("/ingest/broker-email")
+async def ingest_broker_email(
+    submission: BrokerEmailSubmission,
+    client: Client = Depends(get_temporal_client),
+) -> dict:
+    outcome = await start_application(
+        client,
+        channel=Channel.BROKER_EMAIL,
+        external_ref=submission.message_id,
+        product_type=submission.product_type,
+        requested_amount=submission.requested_amount,
+        applicant_name=submission.applicant_name,
+        applicant_ssn=submission.applicant_ssn,
+        submitted_documents=submission.submitted_documents,
+    )
+    if outcome.status == "duplicate":
+        raise HTTPException(
+            409, f"an application with message_id {submission.message_id!r} already exists"
+        )
+    return {
+        "application_id": outcome.application_id,
+        "workflow_id": outcome.workflow_id,
+        "broker_name": submission.broker_name,
+    }
 
 
 @router.get("/applications")
