@@ -1,10 +1,10 @@
 import { useState } from "react";
 import ApplicationList from "./components/ApplicationList.jsx";
-import ReviewQueuePlaceholder from "./components/ReviewQueuePlaceholder.jsx";
+import ReviewQueue from "./components/ReviewQueue.jsx";
 
 const TABS = [
   { id: "applications", label: "Applications", Component: ApplicationList },
-  { id: "reviews", label: "Review Queue", Component: ReviewQueuePlaceholder },
+  { id: "reviews", label: "Review Queue", Component: ReviewQueue },
 ];
 
 export default function App() {
