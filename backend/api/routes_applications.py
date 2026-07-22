@@ -237,14 +237,14 @@ async def submit_review_decision(
         review_task = await session.get(ReviewTask, review_id)
         if review_task is None:
             raise HTTPException(404, "review task not found")
-        review_task.status = "decided"
-        review_task.decision = submission.outcome
-        review_task.notes = submission.notes
         application = await session.get(Application, review_task.application_id)
         if application is None:
             raise HTTPException(404, "application not found")
         workflow_id = application.workflow_id
 
+    # Signal before marking "decided" — if the signal fails, the review
+    # stays "pending" instead of being orphaned in a decided-but-not-signaled
+    # state (see project memory: bug_review_decision_ordering).
     handle = client.get_workflow_handle(workflow_id)
     await handle.signal(
         LoanApplicationWorkflow.submit_review_decision,
@@ -255,6 +255,13 @@ async def submit_review_decision(
             notes=submission.notes,
         ),
     )
+
+    async with session_scope() as session:
+        review_task = await session.get(ReviewTask, review_id)
+        review_task.status = "decided"
+        review_task.decision = submission.outcome
+        review_task.notes = submission.notes
+
     return {"status": "signaled"}
 
 
