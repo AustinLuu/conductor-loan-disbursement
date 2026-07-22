@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: loan_disbursement
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Lightweight single-container dev server (server + sqlite persistence +
+  # Web UI) — not the heavier multi-service temporalio/docker-compose stack.
+  temporal:
+    image: temporalio/temporal:latest
+    command: server start-dev --ip 0.0.0.0 --port 7233 --ui-port 8233
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  worker:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile
+    command: python -m backend.worker
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      DATABASE_URL: postgresql+asyncpg://temporal:temporal@postgres:5432/loan_disbursement
+    depends_on:
+      temporal:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile
+    command: uvicorn backend.api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      DATABASE_URL: postgresql+asyncpg://temporal:temporal@postgres:5432/loan_disbursement
+    depends_on:
+      temporal:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

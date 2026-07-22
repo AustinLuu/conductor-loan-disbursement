@@ -1,0 +1,8 @@
+temporalio>=1.7,<2
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29,<1
+sqlalchemy>=2.0,<3
+asyncpg>=0.29,<1
+pydantic>=2.0,<3
+pytest>=8.0,<9
+pytest-asyncio>=0.23,<1
