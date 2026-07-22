@@ -13,7 +13,6 @@ from temporalio.client import Client
 from backend.db.models import Application, AuditEvent, Check, Document, ReviewTask
 from backend.db.session import session_scope
 from backend.domain import (
-    ApplicationInput,
     BatchRecordResult,
     Channel,
     DocumentSubmission,
