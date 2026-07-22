@@ -1,6 +1,7 @@
-"""Application intake (portal + broker-email) and review/audit endpoints
-(TDD §3.1). Aggregator-batch intake lives in the routes below too, backed by
-BatchIngestionWorkflow — see backend/workflows/batch_ingestion_workflow.py."""
+"""Application intake (portal, broker-email, aggregator-batch) and
+review/audit endpoints (TDD §3.1). Batch intake is backed by
+BatchIngestionWorkflow (TDD §5) — see
+backend/workflows/batch_ingestion_workflow.py."""
 import uuid
 from decimal import Decimal
 
@@ -12,12 +13,15 @@ from temporalio.client import Client
 from backend.db.models import Application, AuditEvent, Check, Document, ReviewTask
 from backend.db.session import session_scope
 from backend.domain import (
+    ApplicationInput,
+    BatchRecordResult,
     Channel,
     DocumentSubmission,
     ProductType,
     ReviewDecision,
 )
 from backend.ingestion import start_application
+from backend.workflows.batch_ingestion_workflow import BatchIngestionWorkflow
 from backend.workflows.loan_application_workflow import LoanApplicationWorkflow
 
 router = APIRouter()
@@ -120,6 +124,20 @@ async def ingest_broker_email(
         "workflow_id": outcome.workflow_id,
         "broker_name": submission.broker_name,
     }
+
+
+@router.post("/ingest/batch")
+async def ingest_batch(
+    records: list[dict],
+    client: Client = Depends(get_temporal_client),
+) -> list[dict]:
+    results: list[BatchRecordResult] = await client.execute_workflow(
+        BatchIngestionWorkflow.run,
+        records,
+        id=f"batch-ingest-{uuid.uuid4()}",
+        task_queue=_TASK_QUEUE,
+    )
+    return [r.model_dump() for r in results]
 
 
 @router.get("/applications")

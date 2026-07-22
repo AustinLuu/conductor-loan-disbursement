@@ -74,3 +74,38 @@ async def test_ingest_broker_email_conflicts_on_duplicate(monkeypatch):
         await routes.ingest_broker_email(_broker_submission(), client=client)
 
     assert exc_info.value.status_code == 409
+
+
+async def test_ingest_batch_returns_per_record_results(monkeypatch):
+    client = SimpleNamespace(
+        execute_workflow=AsyncMock(
+            return_value=[
+                routes.BatchRecordResult(
+                    external_ref="rec-1", status="accepted", application_id="app-1", workflow_id="wf-1"
+                ),
+                routes.BatchRecordResult(external_ref="rec-2", status="rejected", reason="bad ssn"),
+            ]
+        )
+    )
+
+    result = await routes.ingest_batch(
+        [{"external_ref": "rec-1"}, {"external_ref": "rec-2"}], client=client
+    )
+
+    assert result == [
+        {
+            "external_ref": "rec-1",
+            "status": "accepted",
+            "application_id": "app-1",
+            "workflow_id": "wf-1",
+            "reason": "",
+        },
+        {
+            "external_ref": "rec-2",
+            "status": "rejected",
+            "application_id": None,
+            "workflow_id": None,
+            "reason": "bad ssn",
+        },
+    ]
+    client.execute_workflow.assert_awaited_once()
