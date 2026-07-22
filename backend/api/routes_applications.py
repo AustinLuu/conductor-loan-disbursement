@@ -2,7 +2,6 @@
 (TDD §3.1). Aggregator-batch intake lives in the routes below too, backed by
 BatchIngestionWorkflow — see backend/workflows/batch_ingestion_workflow.py."""
 import uuid
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -13,7 +12,6 @@ from temporalio.client import Client
 from backend.db.models import Application, AuditEvent, Check, Document, ReviewTask
 from backend.db.session import session_scope
 from backend.domain import (
-    ApplicationInput,
     Channel,
     DocumentSubmission,
     ProductType,
