@@ -19,6 +19,16 @@ with workflow.unsafe.imports_passed_through():
     from backend.domain import BatchApplicationRecord, BatchRecordResult
 
 
+def _describe_validation_error(exc: ValidationError) -> str:
+    # str(exc) includes each field's raw input_value — for applicant_ssn
+    # that's the rejected SSN itself. include_input=False keeps the reason
+    # human-readable without echoing applicant PII back through the API.
+    return "; ".join(
+        f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}"
+        for err in exc.errors(include_url=False, include_input=False)
+    )
+
+
 @workflow.defn
 class BatchIngestionWorkflow:
     @workflow.run
@@ -39,7 +49,11 @@ class BatchIngestionWorkflow:
                 record = BatchApplicationRecord(**raw)
             except ValidationError as exc:
                 results.append(
-                    BatchRecordResult(external_ref=external_ref, status="rejected", reason=str(exc))
+                    BatchRecordResult(
+                        external_ref=external_ref,
+                        status="rejected",
+                        reason=_describe_validation_error(exc),
+                    )
                 )
                 continue
 

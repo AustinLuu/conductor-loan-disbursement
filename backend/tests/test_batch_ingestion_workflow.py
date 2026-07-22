@@ -81,6 +81,10 @@ async def test_batch_rejects_invalid_record_without_aborting_others():
     assert calls == ["rec-1", "rec-3"]
     assert [r.status for r in results] == ["accepted", "rejected", "accepted"]
     assert results[1].reason
+    # The reason must describe *why* validation failed without echoing the
+    # rejected applicant's raw PII (SSN) back through the API response.
+    assert "not-a-ssn" not in results[1].reason
+    assert "applicant_ssn" in results[1].reason
 
 
 def _mock_failing_activity():
