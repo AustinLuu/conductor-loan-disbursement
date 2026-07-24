@@ -14,7 +14,6 @@ from backend.activities.documents import record_document_status
 from backend.activities.review import create_review_task
 from backend.activities.underwriting import evaluate_underwriting
 from backend.activities.validation import validate_application
-from backend.db.session import init_db
 from backend.workflows.batch_ingestion_workflow import BatchIngestionWorkflow
 from backend.workflows.loan_application_workflow import LoanApplicationWorkflow
 
@@ -44,7 +43,14 @@ async def _connect_with_retry(max_attempts: int = 15, delay_seconds: float = 2.0
 
 
 async def main() -> None:
-    await init_db()
+    # Schema creation is owned solely by the api service's lifespan hook —
+    # see backend/api/main.py. Nothing reaches an activity's DB access
+    # without a workflow first being started, and nothing can start a
+    # workflow without the api service already being up and past its own
+    # init_db() call, so this worker never needs to create tables itself.
+    # Calling create_all() from both services raced on a cold/empty
+    # database (concurrent CREATE TABLE, one side loses with
+    # DuplicateTableError and exits) — this is the fix.
     client = await _connect_with_retry()
     configure_client(client)
     worker = Worker(
